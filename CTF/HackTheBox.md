@@ -121,6 +121,26 @@ In short terms the script is:
 This confirms our shh public key was written to the repo. We can now ssh as root and retrieve the last flag:
 ![CTF](images/ctf-htb-25.png)
 
+## Space Explorer
+Challenge description:
+>A lost space mission control system suffers from flawed authentication logic between its Sender and Receiver services.
+
+We get an archive and identify the files: `main.go` is the sender and `app.py` is the receiver.
+
+In `app.py` we see the endpoint accepts two actions:
+![CTF](images/ctf-htb-28.png)
+
+And in `main.go` we see the data is processed via `json.Unmarshal` a method that decodes json array elements into go array elements. Here we see the request is rejected if the action is `getSecureCode`.
+![CTF](images/ctf-htb-29.png)
+
+An important detail is that data is unmarshalled into a struct, which means sending a request with "action" and "Action" parameters will preserve both values. Since the data is passed in a switch block, we can send a request with two action parameters, getting the correct one to be interpreted by python:
+
+![CTF](images/ctf-htb-26.png)
+
+and we can retrieve the flag:
+
+![CTF](images/ctf-htb-27.png)
+
 
 
 
