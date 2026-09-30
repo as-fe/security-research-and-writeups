@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebGL Fingerprinting – Brave vs Chrome Proof</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #f5f5f5; color: #111; padding: 2rem; }
+  h1 { font-size: 1.2rem; font-weight: 600; margin-bottom: 0.25rem; }
+  .subtitle { font-size: 0.85rem; color: #666; margin-bottom: 2rem; }
+  .section { background: #fff; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 1.5rem; overflow: hidden; }
+  .section-header { padding: 0.75rem 1rem; background: #f9f9f9; border-bottom: 1px solid #ddd; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #555; display: flex; justify-content: space-between; align-items: center; }
+  .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 99px; font-weight: 600; text-transform: none; letter-spacing: 0; }
+  .badge-warn { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
+  .badge-ok { background: #d1e7dd; color: #0a3622; border: 1px solid #0f5132; }
+  .badge-info { background: #cfe2ff; color: #084298; border: 1px solid #084298; }
+  .row { display: flex; justify-content: space-between; padding: 0.6rem 1rem; border-bottom: 1px solid #f0f0f0; font-size: 0.82rem; gap: 1rem; }
+  .row:last-child { border-bottom: none; }
+  .row-label { color: #555; flex-shrink: 0; font-family: monospace; font-size: 0.78rem; }
+  .row-val { font-family: monospace; font-size: 0.78rem; text-align: right; word-break: break-all; max-width: 65%; }
+  .blocked { color: #dc3545; font-weight: 600; }
+  .farbled { color: #fd7e14; font-weight: 600; }
+  .normal { color: #198754; }
+  .ext-grid { padding: 0.75rem 1rem; display: flex; flex-wrap: wrap; gap: 6px; }
+  .ext-tag { font-size: 0.7rem; font-family: monospace; padding: 2px 7px; border-radius: 4px; }
+  .ext-present { background: #d1e7dd; color: #0a3622; border: 1px solid #a3cfbb; }
+  .ext-fake { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
+  .ext-null { color: #dc3545; font-style: italic; padding: 0.75rem 1rem; font-size: 0.82rem; }
+  .precision-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; font-family: monospace; }
+  .precision-table th { background: #f0f0f0; padding: 6px 10px; text-align: left; font-weight: 600; border-bottom: 1px solid #ddd; }
+  .precision-table td { padding: 5px 10px; border-bottom: 1px solid #f5f5f5; }
+  .precision-table tr:last-child td { border-bottom: none; }
+  .canvas-section { padding: 1rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+  .canvas-info { flex: 1; min-width: 200px; }
+  .canvas-label { font-size: 0.75rem; color: #666; margin-bottom: 4px; }
+  canvas { border: 1px solid #ddd; display: block; }
+  .hash-val { font-family: monospace; font-size: 0.75rem; word-break: break-all; margin-top: 6px; color: #333; }
+  .summary { background: #fff; border: 2px solid #0d6efd; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; }
+  .summary-title { font-size: 0.9rem; font-weight: 600; margin-bottom: 0.5rem; }
+  .summary-text { font-size: 0.82rem; line-height: 1.6; color: #333; }
+  .browser-detected { font-size: 0.85rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 6px; display: inline-block; margin-bottom: 1rem; }
+  .note { font-size: 0.75rem; color: #888; margin-top: 0.4rem; font-style: italic; }
+  @media print { body { background: white; padding: 1rem; } }
+</style>
+</head>
+<body>
+
+<h1>WebGL Fingerprinting API Audit</h1>
+<p class="subtitle">Proof of WebGL parameter interception by Brave Shields. </p>
+
+<div id="browser-banner" class="browser-detected"></div>
+
+
+<!-- 1. UNMASKED params -->
+<div class="section">
+  <div class="section-header">
+    1. WEBGL_debug_renderer_info — GPU identity leak
+    <span id="badge-renderer" class="badge"></span>
+  </div>
+  <div class="row"><span class="row-label">UNMASKED_VENDOR_WEBGL</span><span class="row-val" id="vendor">—</span></div>
+  <div class="row"><span class="row-label">UNMASKED_RENDERER_WEBGL</span><span class="row-val" id="renderer">—</span></div>
+  <div class="row"><span class="row-label">Extension object (null = blocked)</span><span class="row-val" id="debug-ext-obj">—</span></div>
+</div>
+
+<!-- 2. getSupportedExtensions -->
+<div class="section">
+  <div class="section-header">
+    2. getSupportedExtensions() — hardware capability fingerprint
+    <span id="badge-ext" class="badge"></span>
+  </div>
+  <div id="ext-container"></div>
+  <p class="note" style="padding: 0.5rem 1rem 0.75rem;">Chrome typically returns 30–40 real extensions. Brave strict mode returns null or a modified list.</p>
+</div>
+
+<!-- 3. getShaderPrecisionFormat -->
+<div class="section">
+  <div class="section-header">
+    3. getShaderPrecisionFormat() — GPU shader precision (fingerprintable)
+    <span id="badge-shader" class="badge"></span>
+  </div>
+  <table class="precision-table" id="shader-table">
+    <tr><th>Shader</th><th>Type</th><th>rangeMin</th><th>rangeMax</th><th>precision</th></tr>
+  </table>
+</div>
+
+<!-- 4. getContextAttributes -->
+<div class="section">
+  <div class="section-header">
+    4. getContextAttributes() — context configuration
+    <span class="badge badge-info">intercepted by Brave</span>
+  </div>
+  <div id="ctx-attrs"></div>
+</div>
+
+<!-- 5. Canvas readPixels -->
+<div class="section">
+  <div class="section-header">
+    5. Rendered pixel hash (readPixels) — GPU rendering fingerprint
+    <span id="badge-pixels" class="badge"></span>
+  </div>
+  <div class="canvas-section">
+    <div class="canvas-info">
+      <div class="canvas-label">Rendered WebGL scene:</div>
+      <canvas id="glcanvas" width="80" height="80"></canvas>
+      <div class="hash-val" id="pixel-hash">computing...</div>
+    </div>
+    <div style="flex:2; min-width:200px; font-size:0.8rem; line-height:1.6; color:#444; padding-top: 1.5rem;">
+      This hash is derived from <code>readPixels()</code> on a rendered scene.
+      Brave farbles the pixel output — the hash will differ between Chrome and Brave,
+      and will change on every page reload in Brave (seeded per eTLD+1 per session).
+    </div>
+  </div>
+</div>
+
+<!-- 6. Key numeric params -->
+<div class="section">
+  <div class="section-header">
+    6. Numeric getParameter() values — GPU capability fingerprint
+    <span class="badge badge-info">farbled in Brave standard+</span>
+  </div>
+  <div id="numeric-params"></div>
+</div>
+
+<script>
+(function() {
+  const canvas = document.createElement('canvas');
+  const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+
+  // Detect Brave
+  const isBrave = navigator.brave && typeof navigator.brave.isBrave === 'function';
+
+  const banner = document.getElementById('browser-banner');
+  if (isBrave) {
+    banner.style.background = '#fff3cd';
+    banner.style.border = '1px solid #ffc107';
+    banner.style.color = '#856404';
+    banner.textContent = '🦁 Brave browser detected — Shields active (if enabled). Check results below.';
+  } else {
+    banner.style.background = '#d1e7dd';
+    banner.style.border = '1px solid #0f5132';
+    banner.style.color = '#0a3622';
+    banner.textContent = '✓ Chrome / non-Brave browser — baseline values shown. Compare with Brave.';
+  }
+
+  if (!gl) {
+    document.getElementById('summary').innerHTML = '<div class="summary-title">WebGL unavailable</div><p class="summary-text">WebGL context could not be created.</p>';
+    return;
+  }
+
+  // ── 1. UNMASKED params ──────────────────────────────────────────────
+  const dbgExt = gl.getExtension('WEBGL_debug_renderer_info');
+  let vendor = '(extension returned null — blocked by browser)';
+  let renderer = '(extension returned null — blocked by browser)';
+  let rendererMasked = !dbgExt;
+
+  if (dbgExt) {
+    vendor = gl.getParameter(dbgExt.UNMASKED_VENDOR_WEBGL) || '(empty)';
+    renderer = gl.getParameter(dbgExt.UNMASKED_RENDERER_WEBGL) || '(empty)';
+    const looksReal = /(intel|nvidia|amd|apple|google|mesa|angle|swiftshader|mali|adreno|qualcomm)/i.test(renderer + vendor);
+    const looksRandom = /^[a-zA-Z0-9]{4,12}$/.test(vendor.trim()) && /^[a-zA-Z0-9]{4,12}$/.test(renderer.trim());
+    rendererMasked = !looksReal || looksRandom;
+  }
+
+  document.getElementById('vendor').textContent = vendor;
+  document.getElementById('vendor').className = 'row-val ' + (rendererMasked ? 'farbled' : 'normal');
+  document.getElementById('renderer').textContent = renderer;
+  document.getElementById('renderer').className = 'row-val ' + (rendererMasked ? 'farbled' : 'normal');
+  document.getElementById('debug-ext-obj').textContent = dbgExt ? 'Object returned (extension available)' : 'null — extension blocked';
+  document.getElementById('debug-ext-obj').className = 'row-val ' + (dbgExt ? 'normal' : 'blocked');
+
+  const b1 = document.getElementById('badge-renderer');
+  b1.textContent = rendererMasked ? 'MASKED / BLOCKED' : 'Real GPU exposed';
+  b1.className = 'badge ' + (rendererMasked ? 'badge-warn' : 'badge-ok');
+
+  // ── 2. getSupportedExtensions ───────────────────────────────────────
+  const extList = gl.getSupportedExtensions();
+  const extContainer = document.getElementById('ext-container');
+  const badge2 = document.getElementById('badge-ext');
+
+  if (!extList) {
+    extContainer.innerHTML = '<div class="ext-null">null — getSupportedExtensions() returned null (blocked by Brave strict mode)</div>';
+    badge2.textContent = 'BLOCKED (null)';
+    badge2.className = 'badge badge-warn';
+  } else {
+    const realExtPatterns = /^(ANGLE_|EXT_|OES_|WEBGL_|KHR_)/;
+    const fakeExts = extList.filter(e => !realExtPatterns.test(e));
+    const realExts = extList.filter(e => realExtPatterns.test(e));
+
+    badge2.textContent = fakeExts.length > 0 ? `${extList.length} extensions (${fakeExts.length} farbled)` : `${extList.length} real extensions`;
+    badge2.className = 'badge ' + (fakeExts.length > 0 ? 'badge-warn' : 'badge-ok');
+
+    let html = '<div class="ext-grid">';
+    extList.forEach(e => {
+      const isFake = !realExtPatterns.test(e);
+      html += `<span class="ext-tag ${isFake ? 'ext-fake' : 'ext-present'}" title="${isFake ? 'Fake/farbled extension injected by Brave' : 'Real extension'}">${e}</span>`;
+    });
+    html += '</div>';
+    html += `<div class="note" style="padding:0 1rem 0.5rem;">Total: ${extList.length}${fakeExts.length > 0 ? ` — ${fakeExts.length} non-standard extension(s) injected by Brave (highlighted in yellow)` : ' — all standard extensions'}</div>`;
+    extContainer.innerHTML = html;
+  }
+
+  // ── 3. getShaderPrecisionFormat ─────────────────────────────────────
+  const shaderTable = document.getElementById('shader-table');
+  const shaderTypes = [
+    [gl.VERTEX_SHADER, 'VERTEX_SHADER'],
+    [gl.FRAGMENT_SHADER, 'FRAGMENT_SHADER']
+  ];
+  const precTypes = [
+    [gl.LOW_FLOAT, 'LOW_FLOAT'],
+    [gl.MEDIUM_FLOAT, 'MEDIUM_FLOAT'],
+    [gl.HIGH_FLOAT, 'HIGH_FLOAT'],
+    [gl.LOW_INT, 'LOW_INT'],
+    [gl.MEDIUM_INT, 'MEDIUM_INT'],
+    [gl.HIGH_INT, 'HIGH_INT'],
+  ];
+  shaderTypes.forEach(([shaderEnum, shaderName]) => {
+    precTypes.forEach(([precEnum, precName]) => {
+      const fmt = gl.getShaderPrecisionFormat(shaderEnum, precEnum);
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${shaderName}</td><td>${precName}</td><td>${fmt ? fmt.rangeMin : 'null'}</td><td>${fmt ? fmt.rangeMax : 'null'}</td><td>${fmt ? fmt.precision : 'null'}</td>`;
+      shaderTable.appendChild(tr);
+    });
+  });
+  document.getElementById('badge-shader').textContent = 'Compare values across browsers';
+  document.getElementById('badge-shader').className = 'badge badge-info';
+
+  // ── 4. getContextAttributes ─────────────────────────────────────────
+  const attrs = gl.getContextAttributes();
+  const attrContainer = document.getElementById('ctx-attrs');
+  if (attrs) {
+    Object.entries(attrs).forEach(([k, v]) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `<span class="row-label">${k}</span><span class="row-val">${v}</span>`;
+      attrContainer.appendChild(row);
+    });
+  } else {
+    attrContainer.innerHTML = '<div class="row"><span class="row-val blocked">null — blocked</span></div>';
+  }
+
+  // ── 5. readPixels hash ──────────────────────────────────────────────
+  const glCanvas = document.getElementById('glcanvas');
+  const glCtx = glCanvas.getContext('webgl');
+  if (glCtx) {
+    // Draw a simple gradient triangle
+    const vs = glCtx.createShader(glCtx.VERTEX_SHADER);
+    glCtx.shaderSource(vs, `attribute vec2 p; void main(){ gl_Position=vec4(p,0,1); }`);
+    glCtx.compileShader(vs);
+    const fs = glCtx.createShader(glCtx.FRAGMENT_SHADER);
+    glCtx.shaderSource(fs, `precision mediump float; uniform vec2 res; void main(){ gl_FragColor=vec4(gl_FragCoord.xy/res, 0.5, 1.0); }`);
+    glCtx.compileShader(fs);
+    const prog = glCtx.createProgram();
+    glCtx.attachShader(prog, vs);
+    glCtx.attachShader(prog, fs);
+    glCtx.linkProgram(prog);
+    glCtx.useProgram(prog);
+    const buf = glCtx.createBuffer();
+    glCtx.bindBuffer(glCtx.ARRAY_BUFFER, buf);
+    glCtx.bufferData(glCtx.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, 0,1]), glCtx.STATIC_DRAW);
+    const loc = glCtx.getAttribLocation(prog, 'p');
+    glCtx.enableVertexAttribArray(loc);
+    glCtx.vertexAttribPointer(loc, 2, glCtx.FLOAT, false, 0, 0);
+    const resLoc = glCtx.getUniformLocation(prog, 'res');
+    glCtx.uniform2f(resLoc, 80, 80);
+    glCtx.drawArrays(glCtx.TRIANGLES, 0, 3);
+
+    const pixels = new Uint8Array(80 * 80 * 4);
+    glCtx.readPixels(0, 0, 80, 80, glCtx.RGBA, glCtx.UNSIGNED_BYTE, pixels);
+
+    // Simple hash
+    let hash = 0;
+    for (let i = 0; i < pixels.length; i++) {
+      hash = ((hash << 5) - hash + pixels[i]) | 0;
+    }
+    const hashHex = (hash >>> 0).toString(16).toUpperCase().padStart(8, '0');
+    const nonZero = pixels.filter(v => v !== 0).length;
+
+    const pixelHashEl = document.getElementById('pixel-hash');
+    if (nonZero === 0) {
+      pixelHashEl.innerHTML = '<span class="blocked">readPixels() returned all zeros — output blocked by Brave</span>';
+      document.getElementById('badge-pixels').textContent = 'BLOCKED';
+      document.getElementById('badge-pixels').className = 'badge badge-warn';
+    } else {
+      pixelHashEl.textContent = `Pixel hash: 0x${hashHex} (${nonZero} non-zero values) — compare this value across browsers`;
+      document.getElementById('badge-pixels').textContent = 'Farbled in Brave (hash differs)';
+      document.getElementById('badge-pixels').className = 'badge badge-info';
+    }
+  }
+
+  // ── 6. Numeric params ───────────────────────────────────────────────
+  const numericParams = [
+    [gl.MAX_TEXTURE_SIZE, 'MAX_TEXTURE_SIZE'],
+    [gl.MAX_VERTEX_ATTRIBS, 'MAX_VERTEX_ATTRIBS'],
+    [gl.MAX_VERTEX_UNIFORM_VECTORS, 'MAX_VERTEX_UNIFORM_VECTORS'],
+    [gl.MAX_FRAGMENT_UNIFORM_VECTORS, 'MAX_FRAGMENT_UNIFORM_VECTORS'],
+    [gl.MAX_VARYING_VECTORS, 'MAX_VARYING_VECTORS'],
+    [gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS, 'MAX_COMBINED_TEXTURE_IMAGE_UNITS'],
+    [gl.MAX_CUBE_MAP_TEXTURE_SIZE, 'MAX_CUBE_MAP_TEXTURE_SIZE'],
+    [gl.MAX_RENDERBUFFER_SIZE, 'MAX_RENDERBUFFER_SIZE'],
+    [gl.MAX_VIEWPORT_DIMS, 'MAX_VIEWPORT_DIMS'],
+    [gl.ALIASED_LINE_WIDTH_RANGE, 'ALIASED_LINE_WIDTH_RANGE'],
+    [gl.ALIASED_POINT_SIZE_RANGE, 'ALIASED_POINT_SIZE_RANGE'],
+  ];
+  const numContainer = document.getElementById('numeric-params');
+  numericParams.forEach(([param, name]) => {
+    const val = gl.getParameter(param);
+    const row = document.createElement('div');
+    row.className = 'row';
+    const display = val instanceof Float32Array || val instanceof Int32Array ? Array.from(val).join(', ') : val;
+    row.innerHTML = `<span class="row-label">${name}</span><span class="row-val">${display}</span>`;
+    numContainer.appendChild(row);
+  });
+
+  
+})();
+</script>
+</body>
+</html>
